@@ -1,0 +1,1440 @@
+"""
+================================================================================
+CFA INSTITUTE RESEARCH CHALLENGE — PROGRAMMATIC CHART & DATA EXTRACTION ENGINE
+Target Company : PT Bank Syariah Indonesia (Persero) Tbk (IDX: BRIS / BRIS.JK)
+Source Model   : BSI_ValuationReport_Model_Claud.xlsx (Integrated Model v11.2)
+Color Palette  : Primary #00A39D (BSI Teal), Secondary #F37021 (BSI Orange)
+Output Folder  : ./charts/ (18 High-Resolution 300-DPI Exhibits + JSON Snapshot)
+================================================================================
+"""
+
+import os
+import json
+import numpy as np
+import openpyxl
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
+# ------------------------------------------------------------------------------
+# 1. PATHS & CORPORATE COLOR PALETTE (BSI TEAL #00A39D & BSI ORANGE #F37021)
+# ------------------------------------------------------------------------------
+BASE_DIR   = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXCEL_PATH = os.path.join(BASE_DIR, "BSI_ValuationReport_Model_Claud.xlsx")
+CHARTS_DIR = os.path.join(BASE_DIR, "charts")
+os.makedirs(CHARTS_DIR, exist_ok=True)
+
+BSI_TEAL      = "#00A39D"   # Primary Brand Color (Hex)
+BSI_ORANGE    = "#F37021"   # Secondary Brand Color (Hex)
+BSI_DARK_TEAL = "#005F5B"   # Deep Header / Accent Teal
+BSI_GOLD      = "#D4AF37"   # Sharia Gold Accent
+BSI_NAVY      = "#1B2631"   # Executive Charcoal / Navy
+BSI_SLATE     = "#5D6D7E"   # Muted Slate Gray
+BSI_RED       = "#C0392B"   # Risk / Downside Crimson
+BSI_GREEN     = "#1E8449"   # Bull / Positive Spread Emerald
+BSI_MINT      = "#E6F5F4"   # Soft Teal Callout Fill
+BSI_CREAM     = "#FEF5EC"   # Soft Orange Callout Fill
+BSI_GRAY_BG   = "#F8F9F9"   # Clean Institutional Chart Background
+
+plt.rcParams.update({
+    "font.family": "sans-serif",
+    "font.sans-serif": ["Calibri", "Segoe UI", "Arial", "DejaVu Sans"],
+    "axes.edgecolor": "#CCCCCC",
+    "axes.linewidth": 0.8,
+    "axes.grid": True,
+    "grid.color": "#E5E8E8",
+    "grid.linestyle": "--",
+    "grid.alpha": 0.65,
+    "figure.facecolor": "white",
+    "axes.facecolor": "white",
+    "savefig.facecolor": "white",
+    "savefig.dpi": 300,
+})
+
+
+# ------------------------------------------------------------------------------
+# 2. COMPLETE MODEL EXTRACTION & TIE-OUT ENGINE
+# ------------------------------------------------------------------------------
+def extract_full_model_data(excel_path: str) -> dict:
+    wb = openpyxl.load_workbook(excel_path, data_only=True)
+    ws = wb["Sheet1"]
+    ws_vc = wb["Valuation_Checks"]
+    ws_tr = wb["Terminal_ROE"]
+    ws_be = wb["Beta_Evidence"]
+    ws_pj = wb["Prob_Justification"]
+    ws_da = wb["Damodaran_Audit"]
+    ws_cf = wb["CF_Direct"]
+    ws_pr = wb["Prices"]
+
+    years = [ws.cell(5, c).value for c in range(5, 20)]  # FY21A .. FY35E
+
+    def row_series(r, start_c=5, end_c=19):
+        return [float(ws.cell(r, c).value or 0.0) for c in range(start_c, end_c + 1)]
+
+    def cf_series(r, start_c=5, end_c=19):
+        return [float(ws_cf.cell(r, c).value or 0.0) for c in range(start_c, end_c + 1)]
+
+    data = {
+        "years": years,
+        "market": {
+            "current_price": float(ws.cell(20, 5).value),
+            "shares_pre_ri_mn": float(ws.cell(21, 5).value),
+            "shares_post_ri_mn": 52929.26,
+            "market_cap_bn": float(ws.cell(20, 5).value) * float(ws.cell(21, 5).value) / 1000.0,
+            "rf_rate": float(ws.cell(24, 5).value),
+            "indogb_10y": float(ws.cell(24, 7).value),
+            "sovereign_spread": float(ws.cell(24, 8).value),
+            "erp_total": float(ws.cell(25, 5).value),
+            "crp": 0.0246,
+            "erp_mature": 0.0423,
+            "beta_raw_1y": 0.6400,
+            "beta_60m_reg": 0.6933,
+            "beta_blume_y1": float(ws.cell(26, 5).value),
+            "ke_y1": float(ws.cell(28, 5).value),
+            "ke_stable": float(ws.cell(378, 19).value),
+            "rel_val_weight": float(ws.cell(29, 5).value),
+            "g_bear": float(ws.cell(30, 5).value),
+            "g_base": float(ws.cell(30, 6).value),
+            "g_bull": float(ws.cell(30, 7).value),
+            "target_car": float(ws.cell(35, 5).value),
+            "min_car_ojk": float(ws.cell(36, 5).value),
+            "fdr_cap": float(ws.cell(37, 5).value),
+            "gwm_min": float(ws.cell(38, 5).value),
+            "ri_shares_mn": float(ws.cell(134, 11).value),
+            "ri_price": float(ws.cell(135, 5).value),
+            "ri_proceeds_bn": 6392.0,
+            "ri_pretax_ret": float(ws.cell(136, 5).value),
+        },
+        "valuation": {
+            "ddm_dec25": float(ws.cell(387, 5).value),
+            "ri_dec25": float(ws.cell(396, 5).value),
+            "tv_share_ddm": float(ws.cell(388, 5).value),
+            "tv_share_ri": float(ws_da.cell(10, 2).value),
+            "ddm_today": float(ws.cell(402, 5).value),
+            "ri_today": float(ws.cell(403, 5).value),
+            "ddm_12m": float(ws.cell(404, 5).value),
+            "ri_12m": float(ws.cell(405, 5).value),
+            "peer_pb_med": float(ws.cell(466, 7).value),
+            "peer_pe_med": float(ws.cell(466, 8).value),
+            "peer_roe_med": float(ws.cell(466, 10).value),
+            "peer_pb_mean": float(ws.cell(465, 7).value),
+            "peer_pe_mean": float(ws.cell(465, 8).value),
+            "peer_roe_mean": float(ws.cell(465, 10).value),
+            "rel_pb_price": float(ws.cell(474, 5).value),
+            "rel_pe_price": float(ws.cell(480, 5).value),
+            "rel_blended_today": float(ws.cell(411, 5).value),
+            "rel_blended_12m": 1230.3768,
+            "blended_12m_base": float(ws.cell(406, 5).value),
+            "prob_wtd_12m": float(ws.cell(439, 8).value),
+            "upside_base": float(ws.cell(440, 6).value),
+            "upside_prob_wtd": float(ws.cell(440, 8).value),
+            "fy26_div_yield": float(ws.cell(342, 10).value),
+            "tsr_base": float(ws.cell(440, 6).value) + float(ws.cell(342, 10).value),
+            "fcfe_dec25": float(ws_vc.cell(5, 2).value),
+            "fcfe_today": float(ws_vc.cell(5, 3).value),
+            "fcfe_12m": float(ws_vc.cell(5, 4).value),
+            "justified_pb_val": float(ws_vc.cell(8, 2).value),
+            "justified_pb_mult": float(ws_vc.cell(8, 3).value),
+            "exit_pb_val": float(ws_vc.cell(9, 2).value),
+            "exit_pb_mult": float(ws_vc.cell(9, 3).value),
+            "reg_slope": float(ws.cell(469, 5).value),
+            "reg_intercept": float(ws.cell(470, 5).value),
+            "reg_r2": float(ws.cell(471, 5).value),
+            "reg_implied_pb": float(ws.cell(472, 5).value),
+            "reg_implied_price": float(ws.cell(473, 5).value),
+        },
+        "series": {
+            # Income Statement (Rp bn)
+            "gross_margin_inc": row_series(141),
+            "third_party_share": row_series(142),
+            "net_margin_inc": row_series(143),
+            "fee_income": row_series(144),
+            "total_op_inc": row_series(145),
+            "personnel_exp": row_series(146),
+            "ga_it_exp": row_series(147),
+            "other_op_exp": row_series(148),
+            "total_opex": row_series(149),
+            "ppop": row_series(150),
+            "provisions": row_series(151),
+            "ebt": row_series(152),
+            "tax_zakat": row_series(153),
+            "net_income": row_series(154),
+            "eff_tax_rate": row_series(155),
+            # Balance Sheet (Rp bn)
+            "cash_bi": row_series(163),
+            "securities": row_series(164),
+            "gross_financing": row_series(165),
+            "allowance_llp": row_series(166),
+            "net_financing": row_series(302),
+            "fixed_rou_intang": row_series(167),
+            "other_assets": row_series(168),
+            "total_assets": row_series(169),
+            "wadiah_demand": row_series(219),
+            "mudharabah_sav": row_series(220),
+            "CASA_total": row_series(223),
+            "mudharabah_td": row_series(221),
+            "total_dpk": row_series(222),
+            "wadiah_liab_bs": row_series(170),
+            "interbank_sukuk": row_series(171),
+            "lease_liab": row_series(172),
+            "other_liab": row_series(173),
+            "temp_syirkah_bs": row_series(174),
+            "total_equity": row_series(175),
+            "total_liab_syirkah": row_series(176),
+            "bs_check": row_series(177),
+            # Cash Flow Indirect (Sheet1 Rp bn) & Direct (CF_Direct Rp bn)
+            "cfo_indirect": row_series(189),
+            "cfi_indirect": row_series(193),
+            "cff_indirect": row_series(200),
+            "net_ch_cash": row_series(201),
+            "cfo_direct": cf_series(20),
+            "cfi_direct": cf_series(26),
+            "cff_direct": cf_series(35),
+            "capex_direct": cf_series(25),
+            "div_paid_cf": cf_series(31),
+            # Segment Financing (Rp bn)
+            "fin_corporate": row_series(207),
+            "fin_commercial": row_series(208),
+            "fin_sme": row_series(209),
+            "fin_micro": row_series(210),
+            "fin_consumer": row_series(211),
+            # Fixed Assets & Capex (Rp bn)
+            "capex_total": row_series(272),
+            "da_total": row_series(265),
+            # Credit & Capital (Rp bn / %)
+            "npf_gross_pct": row_series(103),
+            "npf_net_pct": [0.0087, 0.0057, 0.0055, 0.0050, 0.0047] + [0.0046]*10,
+            "npf_coverage": [v / max(1.0, g) for v, g in zip([abs(x) for x in row_series(166)], row_series(216))],
+            "coc_pct": [0.0207, 0.0193, 0.0119, 0.0083, 0.0084] + [p / max(1.0, f) for p, f in zip(row_series(151)[5:], row_series(214)[5:])],
+            "rwa": row_series(319),
+            "reg_capital": row_series(327),
+            "car_pct": row_series(328),
+            # Ratios & DuPont (%)
+            "roe": [0.1371] + row_series(347)[1:],
+            "roaa": [0.0120] + row_series(346)[1:],
+            "nim_reported": [0.0604, 0.0631, 0.0583, 0.0566, 0.0555] + row_series(248)[5:],
+            "cir": row_series(267),
+            "casa_pct": row_series(73),
+            "fdr_pct": row_series(231),
+            "cash_to_dpk": row_series(181),
+            "dupont_nmi_eq": row_series(354),
+            "dupont_fee_eq": row_series(355),
+            "dupont_opex_eq": row_series(356),
+            "dupont_prov_eq": row_series(357),
+            "dupont_tax_eq": row_series(358),
+            "dupont_em": [10.60] + row_series(349)[1:],
+            "dupont_roe": [0.1371] + row_series(359)[1:],
+            # Per Share & Valuation Schedule
+            "shares_eop": row_series(323),
+            "eps": row_series(350),
+            "bvps": row_series(351),
+            "dps_declared": row_series(340),
+            "dps_paid": row_series(341),
+            "div_yield_decl": row_series(342),
+            "payout_ratio": row_series(108),
+            "ke_path": [0.11229724]*5 + row_series(378)[5:],
+            "df_cum": row_series(377),
+            "ddm_net_dist": row_series(380),
+            "ddm_pv_dps": row_series(381),
+            "ri_flow": row_series(391),
+            "ri_pv": row_series(392),
+            "fcfe_flow": row_series(416),
+            "bi_rate": row_series(44),
+            "gross_yield": [0.0950, 0.0912, 0.0894, 0.0865, 0.0875] + row_series(235)[5:],
+            "cost_of_dpk": [0.0205, 0.0168, 0.0212, 0.0251, 0.0245] + row_series(229)[5:],
+        },
+        "scenarios": {
+            "probs": {"Bear": 0.2917, "Base": 0.5000, "Bull": 0.2083},
+            "ni_fy26": [float(ws.cell(424, c).value) for c in range(5, 9)],
+            "ni_fy27": [float(ws.cell(425, c).value) for c in range(5, 9)],
+            "ni_fy30": [float(ws.cell(426, c).value) for c in range(5, 9)],
+            "ni_fy35": [float(ws.cell(427, c).value) for c in range(5, 9)],
+            "roe_fy26": [float(ws.cell(428, c).value) for c in range(5, 9)],
+            "roe_fy35": [float(ws.cell(429, c).value) for c in range(5, 9)],
+            "nim_fy26": [float(ws.cell(430, c).value) for c in range(5, 9)],
+            "fin_fy35": [float(ws.cell(431, c).value) for c in range(5, 9)],
+            "car_fy35": [float(ws.cell(432, c).value) for c in range(5, 9)],
+            "bvps_fy35": [float(ws.cell(433, c).value) for c in range(5, 9)],
+            "dps_fy35": [float(ws.cell(434, c).value) for c in range(5, 9)],
+            "ddm_dec25": [float(ws.cell(435, c).value) for c in range(5, 9)],
+            "ddm_12m": [float(ws.cell(437, c).value) for c in range(5, 9)],
+            "blended_12m": [float(ws.cell(439, c).value) for c in range(5, 9)],
+            "upside": [float(ws.cell(440, c).value) for c in range(5, 9)],
+            "implied_pb": [float(ws.cell(441, c).value) for c in range(5, 9)],
+        },
+        "tornado": [],
+        "peers": [],
+        "sens_ke_g": {
+            "ke_rows": [0.1025, 0.1125, 0.1225, 0.1325, 0.1425],
+            "g_cols": [0.035, 0.040, 0.045, 0.050, 0.055],
+            "grid": [[float(ws_vc.cell(r, c).value) for c in range(2, 7)] for r in range(14, 19)]
+        },
+        "sens_roe_spread": [
+            {
+                "spread": float(ws_tr.cell(r, 2).value),
+                "term_roe": float(ws_tr.cell(r, 3).value),
+                "term_pb": float(ws_tr.cell(r, 4).value),
+                "val_dec25": float(ws_tr.cell(r, 5).value),
+                "val_12m": float(ws_tr.cell(r, 6).value),
+                "upside_12m": float(ws_tr.cell(r, 7).value),
+            }
+            for r in range(30, 36)
+        ],
+        "beta_specs": [
+            {
+                "label": str(ws_be.cell(r, 1).value),
+                "ke_y1": float(ws_be.cell(r, 2).value),
+                "pt_bear": float(ws_be.cell(r, 3).value),
+                "pt_base": float(ws_be.cell(r, 4).value),
+                "pt_bull": float(ws_be.cell(r, 5).value),
+                "pt_prob": float(ws_be.cell(r, 6).value),
+                "upside_prob": float(ws_be.cell(r, 7).value),
+            }
+            for r in range(27, 31)
+        ],
+        "prices_monthly": {
+            "dates": [str(ws_pr.cell(r, 1).value)[:7] for r in range(2, 71)],
+            "bris": [float(ws_pr.cell(r, 3).value) for r in range(2, 71)],
+            "ihsg": [float(ws_pr.cell(r, 2).value) for r in range(2, 71)],
+        }
+    }
+
+    for r in range(447, 455):
+        data["tornado"].append({
+            "driver": str(ws.cell(r, 2).value),
+            "pt_low_shock": float(ws.cell(r, 5).value),
+            "pt_high_shock": float(ws.cell(r, 6).value),
+            "base_pt": float(ws.cell(r, 7).value),
+            "delta_low": float(ws.cell(r, 8).value),
+            "delta_high": float(ws.cell(r, 9).value),
+        })
+
+    casa_peers = {"BBRI": 65.5, "BMRI": 74.2, "BBNI": 69.8, "BBCA": 81.5, "BTPS": 26.0, "BRIS (BSI)": 61.62}
+    npf_peers  = {"BBRI": 2.95, "BMRI": 1.15, "BBNI": 1.98, "BBCA": 0.78, "BTPS": 3.12, "BRIS (BSI)": 1.81}
+    car_peers  = {"BBRI": 25.1, "BMRI": 20.8, "BBNI": 21.4, "BBCA": 27.8, "BTPS": 51.2, "BRIS (BSI)": 20.41}
+    for r in range(459, 465):
+        tkr = str(ws.cell(r, 2).value)
+        data["peers"].append({
+            "ticker": tkr,
+            "price": float(ws.cell(r, 5).value),
+            "eps_1h26_ann": float(ws.cell(r, 6).value),
+            "pb_jun26": float(ws.cell(r, 7).value),
+            "pe_1h26": float(ws.cell(r, 8).value),
+            "bvps_jun26": float(ws.cell(r, 9).value),
+            "roe_1h26_ann": float(ws.cell(r, 10).value),
+            "patmi_1h26_bn": float(ws.cell(r, 11).value),
+            "equity_jun26_bn": float(ws.cell(r, 12).value),
+            "shares_mn": float(ws.cell(r, 13).value),
+            "mkt_cap_tn": float(ws.cell(r, 5).value) * float(ws.cell(r, 13).value) / 1e6,
+            "casa_pct": casa_peers.get(tkr, 60.0),
+            "npf_pct": npf_peers.get(tkr, 1.90),
+            "car_pct": car_peers.get(tkr, 22.0),
+        })
+
+    with open(os.path.join(CHARTS_DIR, "extracted_full_model.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    return data
+
+
+# ------------------------------------------------------------------------------
+# 3. PROGRAMMATIC GENERATION OF 18 HIGH-RESOLUTION (300 DPI) EXHIBITS
+# ------------------------------------------------------------------------------
+
+def plot_exhibit01_share_price_trajectory(data: dict):
+    """Exhibit 1: Historical Share Price vs Rebased JCI & 12M Bull/Base/Bear Target Cone"""
+    dates = data["prices_monthly"]["dates"] + ["16-Oct-26"]
+    bris  = data["prices_monthly"]["bris"] + [1095.0]
+    ihsg_raw = data["prices_monthly"]["ihsg"] + [7520.0]
+    ihsg_reb = [v / ihsg_raw[0] * bris[0] for v in ihsg_raw]
+
+    fig, ax = plt.subplots(figsize=(10.5, 4.1))
+    x = np.arange(len(bris))
+    ax.plot(x, bris, color=BSI_TEAL, lw=2.5, label="BRIS.JK Share Price (IDR)")
+    ax.plot(x, ihsg_reb, color=BSI_SLATE, lw=1.5, ls="--", alpha=0.8, label="JCI (IHSG) Rebased to BRIS Feb-21")
+    ax.fill_between(x, 700, bris, color=BSI_TEAL, alpha=0.10)
+
+    # Milestones
+    events = [
+        (0, bris[0], "Feb-21: 3-Bank Merger\n(IDR 2,867)", (12, -32)),
+        (22, bris[22], "Dec-22: Rights Issue Base\n(IDR 1,290)", (-15, -36)),
+        (44, bris[44], "Oct-24: Bullion & Rate Rally\n(IDR 3,030)", (-115, 10)),
+        (58, bris[58], "Dec-25: Persero RUPSLB\n(IDR 2,230)", (-130, -28)),
+        (69, 1095.0, "16-Oct-26 Close: IDR 1,095\n(0.99x Jun-26 BV / 0.86x FY26E BV)", (-155, -24)),
+    ]
+    for idx, val, txt, offset in events:
+        ax.scatter(idx, val, color=BSI_DARK_TEAL, s=38, zorder=5)
+        ax.annotate(txt, xy=(idx, val), xytext=offset, textcoords="offset points",
+                    fontsize=7.3, fontweight="bold", color=BSI_NAVY,
+                    bbox=dict(boxstyle="round,pad=0.22", fc="white", ec=BSI_TEAL, lw=0.8),
+                    arrowprops=dict(arrowstyle="->", color=BSI_DARK_TEAL, lw=0.9))
+
+    # 12M Target Cone
+    x_last, y_last = len(bris) - 1, 1095.0
+    x_proj = x_last + 10
+    ax.fill([x_last, x_proj, x_proj], [y_last, 2532.11, 1325.18], color=BSI_TEAL, alpha=0.13, label="12M Scenario Target Cone")
+
+    targets = [
+        (2532.11, "BULL TP: IDR 2,532 (+131.2%)", BSI_GREEN, "--", (8, -2)),
+        (2206.50, "Intrinsic (DDM=RI): IDR 2,206 (+101.5%)", BSI_DARK_TEAL, ":", (8, -2)),
+        (1881.12, "BASE 12M TP: IDR 1,881 (+71.8%)", BSI_TEAL, "-", (8, 5)),
+        (1854.60, "Prob-Wtd TP: IDR 1,855 (+69.4%)", BSI_ORANGE, "-.", (8, -11)),
+        (1325.18, "BEAR TP: IDR 1,325 (+21.0%)", BSI_RED, "--", (8, -2)),
+    ]
+    for y_t, lbl, col, ls_s, off in targets:
+        ax.plot([x_last, x_proj], [y_last, y_t], color=col, ls=ls_s, lw=2.0)
+        ax.scatter(x_proj, y_t, color=col, s=55, zorder=6)
+        ax.annotate(lbl, xy=(x_proj, y_t), xytext=off, textcoords="offset points",
+                    fontsize=7.5, fontweight="bold", color=col,
+                    bbox=dict(boxstyle="round,pad=0.18", fc="white", ec=col, lw=0.85))
+
+    ticks = list(range(0, len(bris), 9)) + [x_proj]
+    tlabels = [dates[i] if i < len(dates) else "12M Target\n(Oct-27E)" for i in ticks]
+    ax.set_xticks(ticks)
+    ax.set_xticklabels(tlabels, fontsize=7.8, rotation=15)
+    ax.set_ylim(700, 3600)
+    ax.set_xlim(-2, x_proj + 30)
+    ax.set_ylabel("Share Price (IDR)", fontsize=8.8, fontweight="bold", color=BSI_NAVY)
+    ax.set_title("Exhibit 1: BRIS.JK Share Price vs. Rebased JCI (Feb 2021 – Oct 2026) & 12-Month Target Price Cone",
+                 fontsize=10.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left", pad=8)
+    ax.legend(loc="upper left", fontsize=7.8, frameon=True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit01_share_price_trajectory.png"))
+    plt.close()
+
+
+def plot_exhibit02_business_revenue_financing_mix(data: dict):
+    """Exhibit 2: Segment Financing Expansion & Sharia Akad / Revenue Engine Mix"""
+    years = data["years"]
+    s = data["series"]
+    idx = [0, 2, 4, 5, 6, 9, 14]  # FY21A, FY23A, FY25A, FY26E, FY27E, FY30E, FY35E
+    yl = [years[i] for i in idx]
+    x = np.arange(len(idx))
+
+    corp = np.array([s["fin_corporate"][i]/1000 for i in idx])
+    comm = np.array([s["fin_commercial"][i]/1000 for i in idx])
+    sme  = np.array([s["fin_sme"][i]/1000 for i in idx])
+    micr = np.array([s["fin_micro"][i]/1000 for i in idx])
+    cons = np.array([s["fin_consumer"][i]/1000 for i in idx])
+    tot  = corp + comm + sme + micr + cons
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    w = 0.55
+    ax1.bar(x, cons, w, label="Consumer (incl. Gold/Rahn)", color=BSI_TEAL)
+    ax1.bar(x, corp, w, bottom=cons, label="Corporate", color=BSI_DARK_TEAL)
+    ax1.bar(x, micr, w, bottom=cons+corp, label="Micro (incl. KUR Syariah)", color=BSI_ORANGE)
+    ax1.bar(x, sme,  w, bottom=cons+corp+micr, label="SME", color=BSI_GOLD)
+    ax1.bar(x, comm, w, bottom=cons+corp+micr+sme, label="Commercial", color=BSI_SLATE)
+    for i, t in enumerate(tot):
+        ax1.text(i, t + 14, f"Rp{t:.0f}tn", ha="center", fontsize=7.3, fontweight="bold", color=BSI_NAVY)
+
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(yl, fontsize=8, fontweight="bold")
+    ax1.set_ylim(0, 930)
+    ax1.set_ylabel("Gross Financing (IDR Trillion)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. Gross Financing by Segment (10Y CAGR: 10.18%)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper left", fontsize=7.1, frameon=True)
+
+    # Right: Sharia Akad Composition (% of Gross Financing from Audited AR) + Fee-to-OpInc Line
+    mura = np.array([61.2, 59.8, 58.6, 58.2, 57.9, 57.5, 57.0])
+    musy = np.array([29.8, 31.0, 31.8, 32.0, 32.1, 32.3, 32.5])
+    qard = np.array([4.8,  5.0,  5.4,  5.7,  6.0,  6.2,  6.5])
+    mudh = np.array([2.2,  2.2,  2.2,  2.1,  2.0,  2.0,  2.0])
+    ijar = 100.0 - (mura + musy + qard + mudh)
+    fee_sh = [s["fee_income"][i] / s["total_op_inc"][i] * 100 for i in idx]
+
+    ax2_r = ax2.twinx()
+    ax2.bar(x, mura, w, label="Murabahah (Fixed-Rate Sale, ~59%)", color=BSI_TEAL)
+    ax2.bar(x, musy, w, bottom=mura, label="Musyarakah (JV Profit-Share, ~32%)", color=BSI_DARK_TEAL)
+    ax2.bar(x, qard, w, bottom=mura+musy, label="Qardh (Gold Rahn / Hajj, ~5%)", color=BSI_ORANGE)
+    ax2.bar(x, mudh+ijar, w, bottom=mura+musy+qard, label="Mudharabah & Ijarah (~4%)", color=BSI_GOLD)
+    ax2_r.plot(x, fee_sh, color=BSI_NAVY, marker="o", lw=2.2, label="Fee & Bullion Income Share (%, RHS)")
+    for i, fs in enumerate(fee_sh):
+        ax2_r.text(i, fs + 0.8, f"{fs:.1f}%", ha="center", fontsize=7.2, fontweight="bold", color=BSI_NAVY)
+
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(yl, fontsize=8, fontweight="bold")
+    ax2.set_ylim(0, 115)
+    ax2_r.set_ylim(10, 32)
+    ax2_r.grid(False)
+    ax2.set_ylabel("Share of Gross Financing by Akad (%)", fontsize=8.5, fontweight="bold")
+    ax2_r.set_ylabel("Fee-Based Income / Operating Income (%)", fontsize=8.5, fontweight="bold", color=BSI_NAVY)
+    ax2.set_title("B. Sharia Akad Portfolio Mix & Fee Revenue Contribution", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax2.get_legend_handles_labels()
+    h2, l2 = ax2_r.get_legend_handles_labels()
+    ax2.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=6.8, ncol=2, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit02_business_revenue_financing_mix.png"))
+    plt.close()
+
+
+def plot_exhibit03_cost_structure_funding_casa(data: dict):
+    """Exhibit 3: Deposit Composition (Wadiah + Mudharabah CASA vs TD) & Cost Structure"""
+    years = data["years"]
+    s = data["series"]
+    idx = [0, 1, 2, 3, 4, 5, 6, 9, 14]
+    yl = [years[i] for i in idx]
+    x = np.arange(len(idx))
+
+    wad = np.array([s["wadiah_demand"][i]/1000 for i in idx])
+    msav = np.array([s["mudharabah_sav"][i]/1000 for i in idx])
+    mtd = np.array([s["mudharabah_td"][i]/1000 for i in idx])
+    casa_r = [s["casa_pct"][i]*100 for i in idx]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1_r = ax1.twinx()
+    ax1.bar(x, wad, 0.55, label="Wadiah Demand & Saving (0% Bonus Floor)", color=BSI_TEAL)
+    ax1.bar(x, msav, 0.55, bottom=wad, label="Mudharabah Savings (Low-Cost Nisbah)", color=BSI_DARK_TEAL)
+    ax1.bar(x, mtd, 0.55, bottom=wad+msav, label="Mudharabah Time Deposits", color="#BDC3C7")
+    ax1_r.plot(x, casa_r, color=BSI_ORANGE, marker="D", lw=2.2, label="CASA Ratio (%, RHS)")
+    for i in [0, 4, 5, 8]:
+        ax1_r.text(i, casa_r[i] + 0.8, f"{casa_r[i]:.1f}%", ha="center", fontsize=7.3, fontweight="bold", color=BSI_ORANGE)
+
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(yl, fontsize=7.8, fontweight="bold", rotation=15)
+    ax1.set_ylim(0, 1050)
+    ax1_r.set_ylim(50, 70)
+    ax1_r.grid(False)
+    ax1.set_ylabel("Third-Party Funds / DPK (IDR Trillion)", fontsize=8.5, fontweight="bold")
+    ax1_r.set_ylabel("CASA Ratio (%)", fontsize=8.5, fontweight="bold", color=BSI_ORANGE)
+    ax1.set_title("A. Third-Party Deposit Franchise & 61.0%+ CASA Moat", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax1_r.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=6.9, frameon=True)
+
+    # Right: Cost Structure Breakdown (% of Operating Income) & Yield vs CoF Spread
+    pers_sh = [s["personnel_exp"][i] / s["total_op_inc"][i] * 100 for i in idx]
+    gait_sh = [s["ga_it_exp"][i] / s["total_op_inc"][i] * 100 for i in idx]
+    oth_sh  = [s["other_op_exp"][i] / s["total_op_inc"][i] * 100 for i in idx]
+    cir_v   = [s["cir"][i] * 100 for i in idx]
+
+    ax2.bar(x, pers_sh, 0.55, label="Personnel Expenses (% OpInc)", color=BSI_DARK_TEAL)
+    ax2.bar(x, gait_sh, 0.55, bottom=pers_sh, label="G&A, IT & BYOND Cloud (% OpInc)", color=BSI_TEAL)
+    ax2.bar(x, oth_sh,  0.55, bottom=np.array(pers_sh)+np.array(gait_sh), label="D&A & Other Operating (% OpInc)", color=BSI_ORANGE)
+    for i, cv in enumerate(cir_v):
+        ax2.text(i, cv + 1.0, f"{cv:.1f}%", ha="center", fontsize=7.2, fontweight="bold", color=BSI_NAVY)
+
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(yl, fontsize=7.8, fontweight="bold", rotation=15)
+    ax2.set_ylim(0, 68)
+    ax2.set_ylabel("% of Total Operating Income (CIR = Sum)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Operating Cost Architecture: CIR Compresses 54.5% → 45.3%", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="upper right", fontsize=7.1, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit03_cost_structure_funding_casa.png"))
+    plt.close()
+
+
+def plot_exhibit04_macro_sharia_penetration(data: dict):
+    """Exhibit 4: Macroeconomic Rate Transmission & Sharia Banking Asset Share (HHI > 2,150)"""
+    years = data["years"]
+    s = data["series"]
+    x = np.arange(len(years))
+
+    bi_r = [v * 100 for v in s["bi_rate"]]
+    g_yld = [v * 100 for v in s["gross_yield"]]
+    dpk_c = [v * 100 for v in s["cost_of_dpk"]]
+    nim_r = [v * 100 for v in s["nim_reported"]]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1.plot(x, g_yld, color=BSI_DARK_TEAL, marker="o", lw=2.0, label="Gross Financing Yield (%)")
+    ax1.plot(x, nim_r, color=BSI_TEAL, marker="s", lw=2.3, label="Net Imbalan / NIM Reported (%)")
+    ax1.plot(x, bi_r,  color=BSI_ORANGE, marker="^", ls="--", lw=1.8, label="BI Policy Rate (Year-End %)")
+    ax1.plot(x, dpk_c, color=BSI_RED, marker="d", ls=":", lw=1.8, label="Blended Cost of Third-Party Funds (%)")
+
+    ax1.set_xticks(x[::2])
+    ax1.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(1.2, 10.5)
+    ax1.set_ylabel("Annualized Rate / Yield (%)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. BI Policy Rate Cycle vs. BSI Gross Yield, NIM & Cost of DPK", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper right", fontsize=7.0, frameon=True)
+
+    # Right: Indonesian Sharia Banking Market Share (OJK 2025/2026 Asset Share, HHI > 2,150)
+    players = [
+        "BSI (BRIS.JK) — Persero Sovereign Leader",
+        "CIMB Niaga Syariah (UUS Spin-Off 2026)",
+        "BTN Syariah / BSN (Spin-Off 2025/26)",
+        "Bank Muamalat Indonesia (Legacy BUS)",
+        "Maybank & Permata Syariah (UUS)",
+        "BTPN Syariah (BTPS) & Other BUS/UUS"
+    ]
+    shares = [42.7, 9.8, 8.5, 6.2, 7.8, 25.0]
+    cols = [BSI_TEAL, BSI_ORANGE, BSI_DARK_TEAL, BSI_GOLD, BSI_SLATE, "#BDC3C7"]
+    yp = np.arange(len(players))[::-1]
+    ax2.barh(yp, shares, height=0.56, color=cols, edgecolor="white")
+    for y_i, sh in zip(yp, shares):
+        ax2.text(sh + 0.8, y_i, f"{sh:.1f}%", va="center", fontsize=8.0, fontweight="bold", color=BSI_NAVY)
+
+    ax2.set_yticks(yp)
+    ax2.set_yticklabels(players, fontsize=7.7, fontweight="bold")
+    ax2.set_xlim(0, 51)
+    ax2.set_xlabel("Share of National Islamic Banking Assets (%)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Monopoly-Like Scale in Sharia Banking (HHI > 2,150; Rp 1,068tn Market)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.text(21.5, 0.8, "OJK 2026 Sharia Asset Target:\nRp 1,170–1,205tn (+9.5% to +12.9% YoY)\nBSI Scale = 4.4x Next Largest Peer",
+             fontsize=7.3, bbox=dict(boxstyle="round,pad=0.25", fc=BSI_MINT, ec=BSI_TEAL))
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit04_macro_sharia_penetration.png"))
+    plt.close()
+
+
+def plot_exhibit05_competitive_positioning_2x2(data: dict):
+    """Exhibit 5: 2x2 Competitive Positioning Matrix & Primary Channel-Check Survey Proxies"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+
+    # Left: 2x2 Competitive Positioning (X = CASA Low-Cost Funding Moat %, Y = 3Y Financing Growth / Franchise Velocity %)
+    banks = [
+        ("BRIS (BSI)", 61.6, 15.8, 415, BSI_TEAL, (-62, 12)),
+        ("BBCA", 81.5, 10.8, 1480, BSI_DARK_TEAL, (-38, 12)),
+        ("BMRI", 74.2, 13.5, 2250, "#2E86C1", (-55, 11)),
+        ("BBRI", 65.5, 9.2, 1980, "#2874A6", (-72, -16)),
+        ("BBNI", 69.8, 8.8, 1120, BSI_SLATE, (12, -18)),
+        ("BTPS", 26.0, 4.2, 22, BSI_ORANGE, (10, 6)),
+        ("BSN (BTN Syariah)", 51.0, 14.2, 91, BSI_GOLD, (-85, -18)),
+    ]
+    ax1.axvline(60.0, color=BSI_SLATE, ls="--", lw=1.1)
+    ax1.axhline(11.5, color=BSI_SLATE, ls="--", lw=1.1)
+    ax1.text(86, 17.1, "QUADRANT I:\nHigh-Growth + Low-Cost Moat", ha="right", fontsize=7.0, fontweight="bold", color=BSI_DARK_TEAL,
+             bbox=dict(boxstyle="round,pad=0.2", fc=BSI_MINT, ec=BSI_TEAL))
+    ax1.text(20, 2.2, "QUADRANT III:\nHigh CoF Niche", ha="left", fontsize=7.0, color=BSI_SLATE)
+
+    for name, casa, gr, assets_tn, col, off in banks:
+        sz = max(70, min(360, assets_tn / 6.0))
+        ax1.scatter(casa, gr, s=sz, color=col, alpha=0.88, edgecolors=BSI_ORANGE if "BRIS" in name else "white", lw=2.2 if "BRIS" in name else 1.2, zorder=5)
+        ax1.annotate(f"{name}\n(CASA {casa:.0f}%, Gr {gr:.1f}%)", xy=(casa, gr), xytext=off, textcoords="offset points",
+                     fontsize=6.9, fontweight="bold", color=col if col != BSI_GOLD else "#9A7D0A",
+                     arrowprops=dict(arrowstyle="-", color=col if col != BSI_GOLD else "#9A7D0A", lw=0.6, alpha=0.6))
+
+    ax1.set_xlim(18, 88)
+    ax1.set_ylim(1.5, 19.2)
+    ax1.set_xlabel("Low-Cost Funding Moat: CASA Ratio (%)", fontsize=8.5, fontweight="bold")
+    ax1.set_ylabel("3-Year Financing CAGR (%) [Franchise Velocity]", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. 2x2 Positioning Matrix: Funding Moat vs. Franchise Growth", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+
+    # Right: Primary Channel-Check & Ecosystem Proxies (Bullion Bank Gold Volume & Hajj/BYOND Adoption)
+    q_labels = ["FY22A", "FY23A", "FY24A", "FY25A", "1H26A", "FY26E", "FY27E"]
+    gold_fin_tn = [5.9, 7.2, 12.8, 22.9, 29.3, 35.8, 46.5]
+    byond_users_m = [4.8, 6.3, 8.0, 12.5, 16.8, 20.5, 25.0]
+    xq = np.arange(len(q_labels))
+
+    ax2_r = ax2.twinx()
+    ax2.bar(xq - 0.16, gold_fin_tn, 0.34, color=BSI_ORANGE, label="Gold Installment & Rahn Portfolio (IDR tn, LHS)")
+    ax2_r.plot(xq + 0.16, byond_users_m, color=BSI_TEAL, marker="o", lw=2.3, label="BYOND Super-App Active Users (mn, RHS)")
+    for i in [0, 3, 4, 6]:
+        ax2.text(i - 0.24, gold_fin_tn[i] + 0.8, f"Rp{gold_fin_tn[i]:.1f}tn", ha="center", fontsize=6.8, fontweight="bold", color=BSI_ORANGE)
+        ax2_r.text(i + 0.22, byond_users_m[i] + 1.25, f"{byond_users_m[i]:.1f}M", ha="center", fontsize=6.8, fontweight="bold", color=BSI_DARK_TEAL)
+
+    ax2.set_xticks(xq)
+    ax2.set_xticklabels(q_labels, fontsize=7.8, fontweight="bold")
+    ax2.set_ylim(0, 55)
+    ax2_r.set_ylim(0, 31)
+    ax2_r.grid(False)
+    ax2.set_ylabel("Gold Cicil Emas & Gadai Portfolio (IDR tn)", fontsize=8.5, fontweight="bold", color=BSI_ORANGE)
+    ax2_r.set_ylabel("BYOND Super-App Active Users (Millions)", fontsize=8.5, fontweight="bold", color=BSI_TEAL)
+    ax2.set_title("B. Channel Checks: Bullion Bank (+700% Users) & BYOND Super-App", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax2.get_legend_handles_labels()
+    h2, l2 = ax2_r.get_legend_handles_labels()
+    ax2.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit05_competitive_positioning_2x2.png"))
+    plt.close()
+
+
+def plot_exhibit06_peer_scatter_pb_vs_roe(data: dict):
+    """Exhibit 6: Peer P/B vs ROE OLS Regression & Multi-Metric Peer Benchmarking"""
+    peers = data["peers"]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+
+    roe_line = np.linspace(11.5, 23.8, 100)
+    pb_line  = -1.0607 + 12.8745 * (roe_line / 100.0)
+    ax1.plot(roe_line, pb_line, color=BSI_DARK_TEAL, ls="--", lw=1.8, label="OLS Line: P/B = -1.061 + 12.875×ROE (R² = 0.68)")
+
+    off_map = {
+        "BBRI": (8, 5),
+        "BMRI": (-58, -16),
+        "BBNI": (-42, 10),
+        "BBCA": (-92, -16),
+        "BTPS": (8, -15),
+        "BRIS (BSI)": (8, -14),
+    }
+    for p in peers:
+        tkr = p["ticker"]
+        rx = p["roe_1h26_ann"] * 100.0
+        py = p["pb_jun26"]
+        is_b = "BRIS" in tkr
+        col = BSI_ORANGE if is_b else BSI_TEAL
+        ax1.scatter(rx, py, s=95 if is_b else 60, color=col, edgecolors="white", lw=1.5, zorder=6)
+        dx, dy = off_map.get(tkr, (8, 5))
+        ax1.annotate(f"{tkr} ({rx:.1f}%, {py:.2f}x)", xy=(rx, py), xytext=(dx, dy),
+                     textcoords="offset points", fontsize=7.3, fontweight="bold", color=col if not is_b else "#D35400")
+
+    ax1.scatter(15.20, 1.4742, s=110, color=BSI_GREEN, marker="*", zorder=7, label="BRIS @ IDR 1,881 Base TP (1.47x FY26E BV)")
+    ax1.annotate("BRIS @ Base 12M TP\n(1.47x FY26E BV)", xy=(15.20, 1.4742), xytext=(-38, 12),
+                 textcoords="offset points", fontsize=7.3, fontweight="bold", color=BSI_GREEN,
+                 bbox=dict(boxstyle="round,pad=0.2", fc="white", ec=BSI_GREEN))
+
+    ax1.set_xlim(11.2, 24.2)
+    ax1.set_ylim(0.4, 2.65)
+    ax1.set_xlabel("1H26 Annualised Return on Equity (ROE %)", fontsize=8.5, fontweight="bold")
+    ax1.set_ylabel("Price-to-Book Multiple on Jun-26 Book (x)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. IDX Peer P/B vs. ROE Regression (1H26 Filings, R² = 0.68)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper left", fontsize=7.0, frameon=True)
+
+    # Right: Peer P/E vs ROE Bar Comparison
+    tkrs = [p["ticker"].replace(" (BSI)", "") for p in peers]
+    pes  = [p["pe_1h26"] for p in peers]
+    pbs  = [p["pb_jun26"] for p in peers]
+    xp = np.arange(len(tkrs))
+    ax2_r = ax2.twinx()
+    b1 = ax2.bar(xp - 0.18, pes, 0.35, color=[BSI_ORANGE if t=="BRIS" else BSI_TEAL for t in tkrs], label="1H26 Annualised P/E (x, LHS)")
+    b2 = ax2_r.bar(xp + 0.18, pbs, 0.35, color=[BSI_GOLD if t=="BRIS" else BSI_DARK_TEAL for t in tkrs], alpha=0.85, label="Jun-26 P/B Multiple (x, RHS)")
+    for i, (pe_v, pb_v) in enumerate(zip(pes, pbs)):
+        ax2.text(i - 0.18, pe_v + 0.25, f"{pe_v:.1f}x", ha="center", fontsize=7.0, fontweight="bold", color=BSI_NAVY)
+        ax2_r.text(i + 0.18, pb_v + 0.06, f"{pb_v:.2f}x", ha="center", fontsize=7.0, fontweight="bold", color=BSI_DARK_TEAL)
+
+    ax2.axhline(5.2018, color=BSI_TEAL, ls="--", lw=1.1, label="Peer Median P/E: 5.20x")
+    ax2_r.axhline(1.1118, color=BSI_DARK_TEAL, ls=":", lw=1.1, label="Peer Median P/B: 1.11x")
+    ax2.set_xticks(xp)
+    ax2.set_xticklabels(tkrs, fontsize=8.0, fontweight="bold")
+    ax2.set_ylim(0, 13.0)
+    ax2_r.set_ylim(0, 2.8)
+    ax2_r.grid(False)
+    ax2.set_ylabel("Price-to-Earnings (P/E, x)", fontsize=8.5, fontweight="bold")
+    ax2_r.set_ylabel("Price-to-Book (P/B, x)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Peer Multiples Comparison (BRIS Trades at -11.0% P/B Discount)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax2.get_legend_handles_labels()
+    h2, l2 = ax2_r.get_legend_handles_labels()
+    ax2.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=6.8, ncol=2, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit06_peer_scatter_pb_vs_roe.png"))
+    plt.close()
+
+
+def plot_exhibit07_topline_margin_jaws(data: dict):
+    """Exhibit 7: Top-Line Decomposition & Positive Operating Leverage (Jaws Ratio)"""
+    years = data["years"]
+    s = data["series"]
+    x = np.arange(len(years))
+
+    nmi = np.array(s["net_margin_inc"]) / 1000.0
+    fee = np.array(s["fee_income"]) / 1000.0
+    ppop = np.array(s["ppop"]) / 1000.0
+    ni   = np.array(s["net_income"]) / 1000.0
+    cir  = [v * 100.0 for v in s["cir"]]
+
+    # YoY growth rates for Jaws (FY22A..FY35E)
+    opinc_g = [(s["total_op_inc"][i]/s["total_op_inc"][i-1] - 1)*100 for i in range(1, len(years))]
+    opex_g  = [(s["total_opex"][i]/s["total_opex"][i-1] - 1)*100 for i in range(1, len(years))]
+    jaws    = [opinc_g[i] - opex_g[i] for i in range(len(opinc_g))]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1_r = ax1.twinx()
+    ax1.bar(x, nmi, 0.56, color=BSI_TEAL, label="Net Margin / Imbalan Income (IDR tn)")
+    ax1.bar(x, fee, 0.56, bottom=nmi, color=BSI_ORANGE, label="Fee & Bullion Income (IDR tn)")
+    ax1.plot(x, ppop, color=BSI_DARK_TEAL, marker="o", lw=2.1, label="PPOP (IDR tn)")
+    ax1.plot(x, ni, color=BSI_GREEN, marker="s", lw=2.1, label="Net Profit / PATMI (IDR tn)")
+    ax1_r.plot(x, cir, color=BSI_RED, ls="--", lw=1.8, label="Cost-to-Income Ratio (CIR %, RHS)")
+
+    ax1.set_xticks(x[::2])
+    ax1.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(0, 72)
+    ax1_r.set_ylim(38, 66)
+    ax1_r.grid(False)
+    ax1.set_ylabel("Income & Profit (IDR Trillion)", fontsize=8.5, fontweight="bold")
+    ax1_r.set_ylabel("Cost-to-Income Ratio (CIR %)", fontsize=8.5, fontweight="bold", color=BSI_RED)
+    ax1.set_title("A. Revenue Decomposition, PPOP & Net Profit (FY21A–FY35E)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax1_r.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=6.7, ncol=2, frameon=True)
+
+    # Right: Positive Operating Leverage ("Jaws Ratio": OpInc Growth vs Opex Growth)
+    xj = np.arange(len(years) - 1)
+    ax2.plot(xj, opinc_g, color=BSI_TEAL, marker="o", lw=2.2, label="Operating Income Growth (% YoY)")
+    ax2.plot(xj, opex_g,  color=BSI_ORANGE, marker="s", lw=2.0, ls="--", label="Operating Expense Growth (% YoY)")
+    ax2.bar(xj, jaws, 0.45, color=[BSI_GREEN if j >= 0 else BSI_RED for j in jaws], alpha=0.35, label="Positive Jaws Spread (OpInc % - Opex %)")
+    ax2.axhline(0, color=BSI_NAVY, lw=0.9)
+
+    ax2.set_xticks(xj[::2])
+    ax2.set_xticklabels([years[i+1] for i in range(0, len(xj), 2)], fontsize=7.6, fontweight="bold")
+    ax2.set_ylim(-6, 22)
+    ax2.set_ylabel("Annual Growth Rate & Jaws Spread (%)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Operating Leverage 'Jaws Ratio' (+1.28pp Avg Forecast Jaws)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="upper right", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit07_topline_margin_jaws.png"))
+    plt.close()
+
+
+def plot_exhibit08_asset_quality_npf_coverage(data: dict):
+    """Exhibit 8: Asset Quality (Gross/Net NPF, NPF Coverage, Cost of Credit) & Liquidity Buffers"""
+    years = data["years"]
+    s = data["series"]
+    x = np.arange(len(years))
+
+    npf_g = [v * 100 for v in s["npf_gross_pct"]]
+    npf_n = [v * 100 for v in s["npf_net_pct"]]
+    coc   = [v * 100 for v in s["coc_pct"]]
+    cov   = [v * 100 for v in s["npf_coverage"]]
+    cash_dpk = [v * 100 for v in s["cash_to_dpk"]]
+    fdr   = [v * 100 for v in s["fdr_pct"]]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1_r = ax1.twinx()
+    ax1.plot(x, npf_g, color=BSI_ORANGE, marker="o", lw=2.2, label="Gross NPF Ratio (%, LHS)")
+    ax1.plot(x, npf_n, color=BSI_TEAL, marker="s", lw=2.0, label="Net NPF Ratio (%, LHS)")
+    ax1.plot(x, coc,   color=BSI_DARK_TEAL, marker="^", ls="--", lw=1.9, label="Cost of Credit (CoC %, LHS)")
+    ax1_r.plot(x, cov, color=BSI_GREEN, marker="D", ls=":", lw=2.0, label="NPF Reserve Coverage (%, RHS)")
+
+    ax1.set_xticks(x[::2])
+    ax1.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(0, 3.6)
+    ax1_r.set_ylim(100, 260)
+    ax1_r.grid(False)
+    ax1.set_ylabel("NPF & Credit Cost (%)", fontsize=8.5, fontweight="bold")
+    ax1_r.set_ylabel("NPF Coverage Ratio (%)", fontsize=8.5, fontweight="bold", color=BSI_GREEN)
+    ax1.set_title("A. Asset Quality: NPF Compresses to 1.80% with >205% Coverage", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax1_r.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=6.9, frameon=True)
+
+    # Right: Liquidity & FDR Discipline
+    ax2_r = ax2.twinx()
+    ax2.plot(x, cash_dpk, color=BSI_TEAL, marker="o", lw=2.2, label="Cash & BI Placements / DPK (%, LHS)")
+    ax2.axhline(7.5, color=BSI_RED, ls="--", lw=1.3, label="Sharia GWM Minimum Floor (7.5%, LHS)")
+    ax2_r.plot(x, fdr, color=BSI_ORANGE, marker="s", ls="-.", lw=2.0, label="Financing-to-Deposit Ratio (FDR %, RHS)")
+    ax2_r.axhline(92.0, color=BSI_DARK_TEAL, ls=":", lw=1.3, label="Internal FDR Cap (92.0%, RHS)")
+
+    ax2.set_xticks(x[::2])
+    ax2.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax2.set_ylim(4, 24)
+    ax2_r.set_ylim(68, 98)
+    ax2_r.grid(False)
+    ax2.set_ylabel("Cash & BI / DPK (%)", fontsize=8.5, fontweight="bold", color=BSI_TEAL)
+    ax2_r.set_ylabel("FDR Ratio (%)", fontsize=8.5, fontweight="bold", color=BSI_ORANGE)
+    ax2.set_title("B. Liquidity Buffer (>2x GWM Floor) & Balanced FDR (85%–89%)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax2.get_legend_handles_labels()
+    h2, l2 = ax2_r.get_legend_handles_labels()
+    ax2.legend(h1 + h2, l1 + l2, loc="lower right", fontsize=6.9, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit08_asset_quality_npf_coverage.png"))
+    plt.close()
+
+
+def plot_exhibit09_dupont_roe_vs_ke_eva(data: dict):
+    """Exhibit 9: 5-Stage Bank DuPont Decomposition & ROE vs Cost of Equity (Ke) EVA Spread"""
+    years = data["years"][1:]  # FY22A..FY35E
+    s = data["series"]
+    x = np.arange(len(years))
+
+    roe = [v * 100 for v in s["roe"][1:]]
+    roaa = [v * 100 for v in s["roaa"][1:]]
+    em   = s["dupont_em"][1:]
+    ke   = [11.23]*4 + [v * 100 for v in s["ke_path"][5:]]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1_r = ax1.twinx()
+    ax1.bar(x, roaa, 0.52, color=BSI_TEAL, alpha=0.85, label="Return on Average Assets (ROAA %, LHS)")
+    ax1_r.plot(x, em, color=BSI_ORANGE, marker="D", lw=2.2, label="Equity Multiplier (Avg Assets / Avg Equity, x, RHS)")
+    for i in [0, 3, 4, 8, 13]:
+        ax1.text(i, roaa[i] + 0.06, f"{roaa[i]:.2f}%", ha="center", fontsize=7.0, fontweight="bold", color=BSI_DARK_TEAL)
+        ax1_r.text(i, em[i] + 0.18, f"{em[i]:.2f}x", ha="center", fontsize=7.0, fontweight="bold", color=BSI_ORANGE)
+
+    ax1.set_xticks(x[::2])
+    ax1.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(0, 2.8)
+    ax1_r.set_ylim(5.0, 10.5)
+    ax1_r.grid(False)
+    ax1.set_ylabel("ROAA (%)", fontsize=8.5, fontweight="bold", color=BSI_DARK_TEAL)
+    ax1_r.set_ylabel("Equity Multiplier (x)", fontsize=8.5, fontweight="bold", color=BSI_ORANGE)
+    ax1.set_title("A. DuPont Core: ROAA Expands to 2.13% as Leverage De-Risks", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax1.get_legend_handles_labels()
+    h2, l2 = ax1_r.get_legend_handles_labels()
+    ax1.legend(h1 + h2, l1 + l2, loc="upper right", fontsize=7.0, frameon=True)
+
+    # Right: ROE vs Cost of Equity (Ke) Spread (EVA Creation)
+    ax2.plot(x, roe, color=BSI_TEAL, marker="o", lw=2.5, label="Return on Average Equity (ROE %)")
+    ax2.plot(x, ke,  color=BSI_ORANGE, marker="s", ls="--", lw=2.1, label="Cost of Equity Path (Ke: 11.23% → 12.25%)")
+    ax2.fill_between(x, ke, roe, color=BSI_TEAL, alpha=0.16, label="Positive Excess Return / EVA (+237bp to +549bp)")
+    for i in [0, 2, 4, 8, 13]:
+        sp = (roe[i] - ke[i]) * 100
+        ax2.annotate(f"{roe[i]:.1f}%\n(+{sp:.0f}bp)", xy=(i, roe[i]), xytext=(0, 7),
+                     textcoords="offset points", ha="center", fontsize=6.9, fontweight="bold", color=BSI_DARK_TEAL)
+
+    ax2.set_xticks(x[::2])
+    ax2.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax2.set_ylim(9.5, 19.5)
+    ax2.set_ylabel("Annualized Rate (%)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Value Creation: ROE Sustains +237bp to +549bp Spread Over Ke", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="lower left", fontsize=7.1, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit09_dupont_roe_vs_ke_eva.png"))
+    plt.close()
+
+
+def plot_exhibit10_capital_car_dividend_fcfe(data: dict):
+    """Exhibit 10: CAR Trajectory (with Q1-27 Rights Issue) & Dividend Payout / FCFE Coverage"""
+    years = data["years"]
+    s = data["series"]
+    x = np.arange(len(years))
+
+    car = [v * 100 for v in s["car_pct"]]
+    dps = s["dps_declared"]
+    pay = [v * 100 for v in s["payout_ratio"]]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    cols = [BSI_DARK_TEAL if i < 5 else (BSI_ORANGE if i == 6 else BSI_TEAL) for i in range(len(years))]
+    ax1.bar(x, car, 0.56, color=cols, alpha=0.88, label="Total CAR (%) [FY27E +Rp 6.39tn Rights Issue]")
+    ax1.axhline(20.0, color=BSI_DARK_TEAL, ls="--", lw=1.5, label="Internal Target CAR Floor (20.00%)")
+    ax1.axhline(13.49, color=BSI_RED, ls=":", lw=1.5, label="OJK Minimum CAR incl. Buffers (13.49%)")
+    for i in [0, 4, 5, 6, 9, 14]:
+        ax1.text(i, car[i] + 0.5, f"{car[i]:.1f}%", ha="center", fontsize=7.1, fontweight="bold", color=BSI_NAVY)
+
+    ax1.set_xticks(x[::2])
+    ax1.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(0, 31.5)
+    ax1.set_ylabel("Capital Adequacy Ratio (CAR %)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. Capital Adequacy: Q1-27 Rights Issue Lifts CAR to 24.5%–26.7%", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="lower right", fontsize=7.0, frameon=True)
+
+    # Right: Declared DPS & Payout Ratio Step-Up
+    ax2_r = ax2.twinx()
+    ax2.bar(x, dps, 0.55, color=BSI_TEAL, label="Declared DPS (IDR/share, LHS)")
+    ax2_r.plot(x, pay, color=BSI_ORANGE, marker="o", lw=2.2, label="Dividend Payout Ratio (%, RHS)")
+    for i in [0, 4, 5, 6, 9, 14]:
+        ax2.text(i, dps[i] + 6, f"Rp{dps[i]:.0f}", ha="center", fontsize=7.0, fontweight="bold", color=BSI_DARK_TEAL)
+
+    ax2.set_xticks(x[::2])
+    ax2.set_xticklabels([years[i] for i in range(0, len(years), 2)], fontsize=7.6, fontweight="bold")
+    ax2.set_ylim(0, 325)
+    ax2_r.set_ylim(0, 78)
+    ax2_r.grid(False)
+    ax2.set_ylabel("Declared Dividend Per Share (IDR)", fontsize=8.5, fontweight="bold", color=BSI_DARK_TEAL)
+    ax2_r.set_ylabel("Dividend Payout Ratio (%)", fontsize=8.5, fontweight="bold", color=BSI_ORANGE)
+    ax2.set_title("B. Capital Return: Payout Ramps 20% → 65% (1.54x FCFE Coverage)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    h1, l1 = ax2.get_legend_handles_labels()
+    h2, l2 = ax2_r.get_legend_handles_labels()
+    ax2.legend(h1 + h2, l1 + l2, loc="upper left", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit10_capital_car_dividend_fcfe.png"))
+    plt.close()
+
+
+def plot_exhibit11_ddm_ri_bridge_waterfall(data: dict):
+    """Exhibit 11: DDM = Residual Income Mathematical Equivalence & Target Price Bridge"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+
+    # Left: RI Build-Up Bridge to Blended 12M Target Price
+    w_labels = [
+        "FY25A\nBVPS",
+        "+PV RI\nFY26-30E",
+        "+PV RI\nFY31-35E",
+        "+PV Term.\nRI (15.5%)",
+        "Intrinsic\n@ Dec-25",
+        "+Roll to\nOct-26",
+        "+Roll to\n12M DDM",
+        "1/3 Rel.\nBlend Adj.",
+        "Blended\n12M TP"
+    ]
+    bottoms = [0, 1126.25, 1407.25, 1597.89, 0, 1890.62, 2019.84, 1881.12, 0]
+    heights = [1126.25, 281.01, 190.63, 292.73, 1890.62, 129.22, 186.66, 325.37, 1881.12]
+    cols    = [BSI_DARK_TEAL, BSI_GREEN, BSI_GREEN, BSI_TEAL, BSI_TEAL, BSI_GOLD, BSI_GOLD, BSI_ORANGE, BSI_TEAL]
+    wx = np.arange(len(w_labels))
+    ax1.bar(wx, heights, 0.56, bottom=bottoms, color=cols, edgecolor="white")
+    disp = ["1,126", "+281", "+191", "+293", "1,891", "+129", "+187", "-325", "1,881"]
+    for i, (b, h, dv) in enumerate(zip(bottoms, heights, disp)):
+        ax1.text(i, b + h + 35, dv, ha="center", fontsize=7.2, fontweight="bold",
+                 color=BSI_ORANGE if dv.startswith("-") else BSI_NAVY)
+
+    ax1.axhline(1095.0, color=BSI_RED, ls="--", lw=1.2, label="Current Price: IDR 1,095")
+    ax1.set_xticks(wx)
+    ax1.set_xticklabels(w_labels, fontsize=6.7, fontweight="bold")
+    ax1.set_ylim(0, 2520)
+    ax1.set_ylabel("Value per Share (IDR)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. Residual Income & DDM Equivalence Bridge to IDR 1,881 Target Price", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper left", fontsize=7.2, frameon=True)
+
+    # Right: Annual PV of Residual Income vs PV of Net Dividends (FY26E–FY35E)
+    f_years = data["years"][5:]
+    fx = np.arange(len(f_years))
+    pv_ri  = [v / 46.12926 for v in data["series"]["ri_pv"][5:]]      # IDR/sh
+    pv_dps = data["series"]["ddm_pv_dps"][5:]                          # IDR/sh
+
+    ax2.bar(fx - 0.18, pv_ri, 0.35, color=BSI_TEAL, label="PV of Annual Residual Income (IDR/sh)")
+    ax2.bar(fx + 0.18, pv_dps, 0.35, color=BSI_ORANGE, label="PV of Net Dividend / Rights Cash Flow (IDR/sh)")
+    ax2.axhline(0, color=BSI_NAVY, lw=0.8)
+    for i in [0, 1, 4, 9]:
+        ax2.text(i - 0.18, pv_ri[i] + 3, f"{pv_ri[i]:.0f}", ha="center", fontsize=6.9, fontweight="bold", color=BSI_DARK_TEAL)
+        y_pos = pv_dps[i] + 3 if pv_dps[i] >= 0 else pv_dps[i] - 11
+        ax2.text(i + 0.18, y_pos, f"{pv_dps[i]:.0f}", ha="center", fontsize=6.9, fontweight="bold", color=BSI_ORANGE)
+
+    ax2.set_xticks(fx)
+    ax2.set_xticklabels(f_years, fontsize=7.5, fontweight="bold", rotation=15)
+    ax2.set_ylim(-105, 115)
+    ax2.set_ylabel("Present Value per Pre-RI Share @ Dec-25 (IDR)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Explicit Forecast Cash Flows (FY26E–FY35E): RI vs. DDM (0.00% Gap)", fontsize=9.3, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="lower right", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit11_ddm_ri_bridge_waterfall.png"))
+    plt.close()
+
+
+def plot_exhibit12_valuation_football_field(data: dict):
+    """Exhibit 12: Comprehensive Valuation Football Field Across 8 Methodologies"""
+    fig, ax = plt.subplots(figsize=(10.5, 4.1))
+    methods = [
+        "52-Week Trading Range (IDX: BRIS)",
+        "Peer P/B vs. ROE Regression (±10%)",
+        "Peer-Median P/B Multiple (1.11x ±10%)",
+        "Exit P/B (1.11x) & Justified P/B (1.36x)",
+        "Blended 12M Target Price (Bear–Bull)",
+        "Intrinsic DDM = RI 12M Value (Bear–Bull)",
+        "Banking FCFE Cross-Check (Dec-25 to 12M)",
+        "Sell-Side Consensus Target Range"
+    ]
+    lows  = [1095.0, 1012.9, 1107.1, 1562.6, 1325.2, 1368.1, 2356.9, 2460.0]
+    highs = [2740.0, 1238.0, 1353.1, 1736.9, 2532.1, 3188.5, 2769.6, 3800.0]
+    mids  = [1095.0, 1125.5, 1230.1, 1649.8, 1881.1, 2206.5, 2526.1, 2740.0]
+    cols  = ["#95A5A6", "#48C9B0", "#48C9B0", BSI_GOLD, BSI_TEAL, BSI_DARK_TEAL, BSI_GREEN, BSI_SLATE]
+
+    y = np.arange(len(methods))
+    for i, (lo, hi, mid, c) in enumerate(zip(lows, highs, mids, cols)):
+        ax.barh(i, hi - lo, left=lo, height=0.54, color=c, alpha=0.86, edgecolor="white")
+        ax.scatter(mid, i, color="white", edgecolors=BSI_NAVY, s=42, zorder=5)
+        ax.text(lo - 35, i, f"Rp {lo:,.0f}", ha="right", va="center", fontsize=7.5, fontweight="bold", color=BSI_SLATE)
+        ax.text(hi + 35, i, f"Rp {hi:,.0f}", ha="left", va="center", fontsize=7.5, fontweight="bold", color=BSI_NAVY)
+
+    ax.axvline(1095.0, color=BSI_RED, ls="--", lw=1.6, label="Current Price (16-Oct-26): IDR 1,095")
+    ax.axvline(1881.1, color=BSI_TEAL, ls="-", lw=2.2, label="Base 12M Blended Target Price: IDR 1,881 (+71.8%)")
+    ax.axvline(1854.6, color=BSI_ORANGE, ls="-.", lw=1.8, label="Probability-Weighted 12M TP: IDR 1,855 (+69.4%)")
+
+    ax.set_yticks(y)
+    ax.set_yticklabels(methods, fontsize=8.2, fontweight="bold")
+    ax.set_xlim(650, 4250)
+    ax.set_xlabel("Implied Share Price (IDR / share)", fontsize=8.8, fontweight="bold")
+    ax.set_title("Exhibit 12: Valuation Football Field Summary Across 8 Intrinsic & Relative Methodologies",
+                 fontsize=10.0, fontweight="bold", color=BSI_DARK_TEAL, loc="left", pad=8)
+    ax.legend(loc="lower right", fontsize=7.8, frameon=True)
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit12_valuation_football_field.png"))
+    plt.close()
+
+
+def plot_exhibit13_sensitivity_2d_heatmap(data: dict):
+    """Exhibit 13: 2D Sensitivity Heatmap (Ke vs Terminal Growth g) & Terminal ROE Spread Sensitivity"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+
+    grid = np.array(data["sens_ke_g"]["grid"])
+    ke_r = [f"{v*100:.2f}%" for v in data["sens_ke_g"]["ke_rows"]]
+    g_c  = [f"{v*100:.1f}%" for v in data["sens_ke_g"]["g_cols"]]
+
+    im = ax1.imshow(grid, cmap="YlGnBu", aspect="auto")
+    for r in range(grid.shape[0]):
+        for c in range(grid.shape[1]):
+            val = grid[r, c]
+            is_center = (r == 2 and c == 2)
+            ax1.text(c, r, f"Rp {val:,.0f}", ha="center", va="center",
+                     fontsize=7.8, fontweight="bold",
+                     color="white" if val > 1950 else BSI_NAVY,
+                     bbox=dict(boxstyle="round,pad=0.15", fc=BSI_ORANGE, ec="white", lw=1.2) if is_center else None)
+
+    ax1.set_xticks(np.arange(len(g_c)))
+    ax1.set_xticklabels(g_c, fontsize=8.0, fontweight="bold")
+    ax1.set_yticks(np.arange(len(ke_r)))
+    ax1.set_yticklabels(ke_r, fontsize=8.0, fontweight="bold")
+    ax1.set_xlabel("Terminal Growth Rate (g %)", fontsize=8.5, fontweight="bold")
+    ax1.set_ylabel("Flat Stable Cost of Equity (Ke %)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. 2D Sensitivity Matrix: Flat Ke vs. Terminal Growth (IDR/sh @ Dec-25)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+
+    # Right: Terminal ROE Spread over Ke Sensitivity (Terminal_ROE Tab R30-R35)
+    tr_list = data["sens_roe_spread"]
+    sp_lbls = [f"+{d['spread']*100:.0f}pp\n({d['term_roe']*100:.2f}%)" for d in tr_list]
+    v_dec25 = [d["val_dec25"] for d in tr_list]
+    v_12m   = [d["val_12m"] for d in tr_list]
+    xt = np.arange(len(tr_list))
+
+    ax2.bar(xt - 0.18, v_dec25, 0.35, color=BSI_TEAL, label="Intrinsic Value @ Dec-25 (IDR/sh)")
+    ax2.bar(xt + 0.18, v_12m,   0.35, color=BSI_ORANGE, label="12M Intrinsic Target Price (IDR/sh)")
+    for i, (v0, v1) in enumerate(zip(v_dec25, v_12m)):
+        ax2.text(i - 0.18, v0 + 35, f"{v0:,.0f}", ha="center", fontsize=6.9, fontweight="bold", color=BSI_DARK_TEAL)
+        ax2.text(i + 0.18, v1 + 35, f"{v1:,.0f}", ha="center", fontsize=6.9, fontweight="bold", color=BSI_ORANGE)
+
+    ax2.axhline(1095.0, color=BSI_RED, ls="--", lw=1.2, label="Current Price: IDR 1,095")
+    ax2.set_xticks(xt)
+    ax2.set_xticklabels(sp_lbls, fontsize=7.4, fontweight="bold")
+    ax2.set_ylim(0, 3150)
+    ax2.set_xlabel("Terminal ROE Spread Over Stable Ke (12.25%)", fontsize=8.5, fontweight="bold")
+    ax2.set_ylabel("Intrinsic Value per Share (IDR)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Intrinsic Sensitivity to Terminal ROE Spread (+0pp Bear to +5pp)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="upper left", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit13_sensitivity_2d_heatmap.png"))
+    plt.close()
+
+
+def plot_exhibit14_scenario_analysis_matrix(data: dict):
+    """Exhibit 14: Bull, Base, Bear & Prob-Wtd Scenario Comparison"""
+    sc = data["scenarios"]
+    cases = ["Bear Case\n(29.17% Prob)", "Base Case\n(50.00% Prob)", "Bull Case\n(20.83% Prob)", "Prob-Weighted\n(100.0% Total)"]
+    x = np.arange(len(cases))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    # Left: Target Price Comparison (Intrinsic @ Dec-25, Intrinsic 12M, Blended 12M TP)
+    v_dec = sc["ddm_dec25"]
+    v_12m = sc["ddm_12m"]
+    v_bld = sc["blended_12m"]
+
+    ax1.bar(x - 0.24, v_dec, 0.23, color=BSI_DARK_TEAL, label="Intrinsic Value @ Dec-25 (IDR)")
+    ax1.bar(x,        v_12m, 0.23, color=BSI_TEAL, label="12M Pure Intrinsic DDM=RI (IDR)")
+    ax1.bar(x + 0.24, v_bld, 0.23, color=BSI_ORANGE, label="12M Blended Target Price (IDR)")
+    for i in range(len(cases)):
+        ax1.text(i + 0.24, v_bld[i] + 45, f"Rp{v_bld[i]:,.0f}\n({sc['upside'][i]*100:+.1f}%)", ha="center", fontsize=7.0, fontweight="bold", color=BSI_ORANGE)
+
+    ax1.axhline(1095.0, color=BSI_RED, ls="--", lw=1.3, label="Current Price: IDR 1,095")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(cases, fontsize=7.6, fontweight="bold")
+    ax1.set_ylim(0, 3600)
+    ax1.set_ylabel("Share Price / Valuation (IDR)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. Scenario Valuation Outputs (7 Downside : 5 Upside Evidence Weights)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper left", fontsize=6.9, frameon=True)
+
+    # Right: Net Profit Progression Across Scenarios (FY26E, FY27E, FY30E, FY35E in IDR tn)
+    ni26 = [v/1000 for v in sc["ni_fy26"]]
+    ni27 = [v/1000 for v in sc["ni_fy27"]]
+    ni30 = [v/1000 for v in sc["ni_fy30"]]
+    ni35 = [v/1000 for v in sc["ni_fy35"]]
+
+    ax2.bar(x - 0.27, ni26, 0.18, color="#85C1E9", label="FY26E Net Profit (IDR tn)")
+    ax2.bar(x - 0.09, ni27, 0.18, color=BSI_TEAL, label="FY27E Net Profit (IDR tn)")
+    ax2.bar(x + 0.09, ni30, 0.18, color=BSI_DARK_TEAL, label="FY30E Net Profit (IDR tn)")
+    ax2.bar(x + 0.27, ni35, 0.18, color=BSI_ORANGE, label="FY35E Net Profit (IDR tn)")
+    for i in range(len(cases)):
+        ax2.text(i + 0.27, ni35[i] + 0.6, f"Rp{ni35[i]:.1f}tn", ha="center", fontsize=7.1, fontweight="bold", color=BSI_ORANGE)
+
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(cases, fontsize=7.6, fontweight="bold")
+    ax2.set_ylim(0, 36)
+    ax2.set_ylabel("Net Profit / PATMI (IDR Trillion)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Earnings Trajectory Across Bear, Base, Bull & Prob-Wtd Cases", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="upper left", fontsize=6.9, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit14_scenario_analysis_matrix.png"))
+    plt.close()
+
+
+def plot_exhibit15_risk_matrix_and_tornado(data: dict):
+    """Exhibit 15: 2D Risk Heatmap Matrix & One-at-a-Time Tornado Sensitivity Chart"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.4, 4.2), gridspec_kw={"width_ratios": [0.98, 1.22]})
+
+    gx, gy = np.meshgrid(np.linspace(0.5, 5.5, 100), np.linspace(0.5, 5.5, 100))
+    ax1.imshow(gx * gy, extent=[0.5, 5.5, 0.5, 5.5], origin="lower", cmap="YlOrRd", alpha=0.36, aspect="auto")
+
+    risks = [
+        ("MR1", "MR1: Higher-for-Longer BI Rate (5.75%)\n& Deposit Cost Stickiness", 4.2, 4.65, BSI_RED, "left"),
+        ("MR2", "MR2: MSCI Standalone Consultation\n& Foreign Outflow De-Rating", 3.6, 4.12, BSI_RED, "left"),
+        ("BR3", "BR3: Related-Party Musyarakah (+45%)\n& NPF Normalization", 2.0, 3.60, BSI_DARK_TEAL, "right"),
+        ("IR1", "IR1: UUS Spin-Offs (BTN/CIMB Syariah)\nCorporate Yield Compression", 3.8, 3.08, BSI_ORANGE, "left"),
+        ("BR2", "BR2: Q1-27 Rights Issue Dilution\n& Deployment Lag", 2.1, 2.56, BSI_DARK_TEAL, "right"),
+        ("BR1", "BR1: IT/BYOND Opex Overrun\n(CIR Stays >54.5%)", 3.4, 2.04, BSI_DARK_TEAL, "left"),
+        ("IR2", "IR2: Gold Price Volatility Impacting\nBullion/Rahn Fee Momentum", 2.2, 1.52, BSI_ORANGE, "right"),
+    ]
+    for code, desc, lk, imp, col, side in risks:
+        ax1.scatter(lk, imp, s=185, color=col, edgecolors="white", lw=1.5, zorder=5)
+        ax1.text(lk, imp, code, ha="center", va="center", fontsize=7.0, fontweight="bold", color="white", zorder=6)
+        dx = -12 if side == "left" else 12
+        ha_align = "right" if side == "left" else "left"
+        ax1.annotate(desc, xy=(lk, imp), xytext=(dx, 0), textcoords="offset points",
+                     ha=ha_align, va="center", fontsize=6.5, fontweight="bold", color=BSI_NAVY,
+                     bbox=dict(boxstyle="round,pad=0.16", fc="white", ec=col, alpha=0.94, lw=0.7))
+
+    ax1.set_xlim(0.7, 5.0)
+    ax1.set_ylim(1.15, 5.05)
+    ax1.set_xticks([1.5, 3.0, 4.5])
+    ax1.set_xticklabels(["Low", "Moderate", "High"], fontsize=8, fontweight="bold")
+    ax1.set_yticks([2.0, 3.25, 4.5])
+    ax1.set_yticklabels(["Low", "Moderate", "High"], fontsize=8, fontweight="bold")
+    ax1.set_xlabel("Likelihood of Occurrence (7 Downside : 5 Upside Tally)", fontsize=8.2, fontweight="bold")
+    ax1.set_ylabel("Valuation & Earnings Impact", fontsize=8.2, fontweight="bold")
+    ax1.set_title("A. 2D Risk Matrix: Macro (MR), Industry (IR) & Business (BR)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+
+    # Right: Tornado Chart (Sorted ascending so largest swing is at top)
+    tornado = sorted(data["tornado"], key=lambda t: abs(t["delta_high"]) + abs(t["delta_low"]))
+    t_labels = [t["driver"] for t in tornado]
+    base_pt  = tornado[0]["base_pt"]
+    ty = np.arange(len(tornado))
+
+    for i, t in enumerate(tornado):
+        lo_pt = min(t["pt_low_shock"], t["pt_high_shock"])
+        hi_pt = max(t["pt_low_shock"], t["pt_high_shock"])
+        ax2.barh(i, lo_pt - base_pt, left=base_pt, height=0.55, color=BSI_ORANGE, alpha=0.88,
+                 label="Downside Driver Shock" if i == 0 else "")
+        ax2.barh(i, hi_pt - base_pt, left=base_pt, height=0.55, color=BSI_TEAL, alpha=0.88,
+                 label="Upside Driver Shock" if i == 0 else "")
+        ax2.text(lo_pt - 8, i, f"Rp{lo_pt:,.0f} ({lo_pt-base_pt:+.0f})", ha="right", va="center",
+                 fontsize=6.8, fontweight="bold", color=BSI_RED)
+        ax2.text(hi_pt + 8, i, f"Rp{hi_pt:,.0f} ({hi_pt-base_pt:+.0f})", ha="left", va="center",
+                 fontsize=6.8, fontweight="bold", color=BSI_DARK_TEAL)
+
+    ax2.axvline(base_pt, color=BSI_NAVY, lw=1.6, label=f"Base 12M TP: IDR {base_pt:,.0f}")
+    ax2.set_yticks(ty)
+    ax2.set_yticklabels(t_labels, fontsize=7.6, fontweight="bold")
+    ax2.set_xlim(1500, 2260)
+    ax2.set_xlabel("12-Month Blended Target Price (IDR/share)", fontsize=8.2, fontweight="bold")
+    ax2.set_title("B. Tornado Sensitivity on 12M Blended Target Price (Base = IDR 1,881)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="lower right", fontsize=7.2, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit15_risk_matrix_and_tornado.png"))
+    plt.close()
+
+
+def plot_exhibit16_esg_scorecard_and_ke_link(data: dict):
+    """Exhibit 16: ESG Pillar Benchmarking & Quantitative Transmission to Ke and Scenario Weights"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.2, 3.9), gridspec_kw={"width_ratios": [1.1, 1.05]})
+
+    pillars = [
+        "Environmental: Green Sukuk &\nSustainable Financing (Rp 66.5tn)",
+        "Social: MSME/KUR Inclusion,\nZakat (Rp 316bn) & Gender Diversity",
+        "Governance: Danantara Persero\nBoard, DSN-MUI & G20 Rights",
+        "Digital & Cyber Resilience:\nBYOND Super-App & ISO 27001",
+        "COMPOSITE SHARIA ESG SCORE\n(Weighted 25% E / 35% S / 40% G)"
+    ]
+    bris_s = [88.5, 94.0, 91.2, 86.0, 91.1]
+    peer_s = [79.0, 81.5, 84.0, 85.0, 82.4]
+    y = np.arange(len(pillars))[::-1]
+
+    ax1.barh(y + 0.17, bris_s, height=0.33, color=BSI_TEAL, label="BSI (BRIS.JK)")
+    ax1.barh(y - 0.17, peer_s, height=0.33, color="#95A5A6", label="KBMI-4 Peer Average")
+    for yp, bs, ps in zip(y, bris_s, peer_s):
+        ax1.text(bs + 0.8, yp + 0.17, f"{bs:.1f}", va="center", fontsize=7.5, fontweight="bold", color=BSI_DARK_TEAL)
+        ax1.text(ps + 0.8, yp - 0.17, f"{ps:.1f}", va="center", fontsize=7.2, color=BSI_SLATE)
+
+    ax1.set_yticks(y)
+    ax1.set_yticklabels(pillars, fontsize=7.5, fontweight="bold")
+    ax1.set_xlim(0, 106)
+    ax1.set_xlabel("Customized Islamic Banking ESG Score (0–100 Scale)", fontsize=8.2, fontweight="bold")
+    ax1.set_title("A. Customized Islamic Banking ESG & G20 Governance Scorecard", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="lower right", fontsize=7.5, frameon=True)
+
+    trans_items = [
+        "Base IDR Risk-Free Rate (7.18% - 1.62%)",
+        "+ Full Country Risk Premium (λ = 1.00)",
+        "+ β (0.7588→1.00) × Mature ERP (4.23%)",
+        "+ ESG / Size / Specific Risk Premium",
+        "= Year-1 Ke (11.23%) → Stable Ke (12.25%)",
+        "Governance Watch: Related-Party Musyarakah\n(+45% YTD) & Cyber Opex → Bear Weight 29.2%",
+        "Sharia Moat & Social Inclusion (+200bp Spread)\n→ Terminal ROE 14.25% (Base) / 16.25% (Bull)"
+    ]
+    trans_vals = [5.56, 2.46, 3.21, 0.00, 11.23, 12.25, 14.25]
+    t_cols = [BSI_TEAL, BSI_GOLD, BSI_TEAL, BSI_GREEN, BSI_DARK_TEAL, BSI_ORANGE, BSI_GREEN]
+    ty = np.arange(len(trans_items))[::-1]
+    ax2.barh(ty, trans_vals, height=0.52, color=t_cols, alpha=0.88)
+    annots = [
+        "5.56% (10Y IndoGB net of Baa2 spread)",
+        "+2.46% (Damodaran Jan-26 CRP)",
+        "+3.21% Y1 (+4.23% by FY35E)",
+        "0.00% (No ESG/Governance Penalty)",
+        "11.23% Y1 / 12.25% Terminal Ke",
+        "12.25% Bear ROE_T (29.17% Prob)",
+        "14.25% Base ROE_T (50.0% Prob)"
+    ]
+    for yp, v, an in zip(ty, trans_vals, annots):
+        ax2.text(v + 0.25, yp, an, va="center", fontsize=7.1, fontweight="bold", color=BSI_NAVY)
+
+    ax2.set_yticks(ty)
+    ax2.set_yticklabels(trans_items, fontsize=7.2, fontweight="bold")
+    ax2.set_xlim(0, 24.5)
+    ax2.set_xlabel("Rate / Cost of Equity / Terminal ROE Impact (%)", fontsize=8.2, fontweight="bold")
+    ax2.set_title("B. ESG-to-Valuation Transmission: Ke Build & Scenario Weighting", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit16_esg_scorecard_and_ke_link.png"))
+    plt.close()
+
+
+def plot_exhibit17_historical_pb_band_beta(data: dict):
+    """Exhibit 17 (Appendix): 5-Year Historical P/B Band & 4-Specification Beta Evidence Sensitivity"""
+    dates = data["prices_monthly"]["dates"]
+    prices = np.array(data["prices_monthly"]["bris"])
+    bvps_anchors = np.interp(np.arange(len(prices)), [0, 10, 22, 34, 46, 58, 68],
+                             [580, 608.2, 726.4, 839.8, 976.4, 1126.2, 1106.5])
+    pb_series = np.append(prices / bvps_anchors, 0.9896)
+    dates_all = dates + ["16-Oct-26"]
+    x = np.arange(len(pb_series))
+    mean_pb = float(np.mean(pb_series))
+    sd_pb   = float(np.std(pb_series))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.0))
+    ax1.plot(x, pb_series, color=BSI_TEAL, lw=2.2, label="BRIS Trailing P/B (x)")
+    ax1.axhline(mean_pb, color=BSI_DARK_TEAL, ls="-", lw=1.4, label=f"5Y Mean P/B: {mean_pb:.2f}x")
+    ax1.axhline(mean_pb + sd_pb, color=BSI_GOLD, ls="--", lw=1.1, label=f"+1SD: {mean_pb+sd_pb:.2f}x")
+    ax1.axhline(mean_pb - sd_pb, color=BSI_ORANGE, ls="--", lw=1.1, label=f"-1SD: {mean_pb-sd_pb:.2f}x")
+    ax1.axhline(mean_pb + 2*sd_pb, color=BSI_SLATE, ls=":", lw=1.0, label=f"+2SD: {mean_pb+2*sd_pb:.2f}x")
+    ax1.axhline(mean_pb - 2*sd_pb, color=BSI_RED, ls=":", lw=1.2, label=f"-2SD: {mean_pb-2*sd_pb:.2f}x")
+    ax1.scatter(len(pb_series)-1, 0.9896, color=BSI_RED, s=50, zorder=6)
+    ax1.annotate("16-Oct-26: 0.99x Jun-26 BV\n(0.86x FY26E BV — Near -2SD!)\nBase TP Implies 1.47x FY26E BV",
+                 xy=(len(pb_series)-1, 0.99), xytext=(-150, 24), textcoords="offset points",
+                 fontsize=7.2, fontweight="bold", color=BSI_RED,
+                 bbox=dict(boxstyle="round,pad=0.22", fc="white", ec=BSI_RED, lw=0.9),
+                 arrowprops=dict(arrowstyle="->", color=BSI_RED, lw=1.0))
+
+    tick_idx = list(range(0, len(dates_all) - 5, 11)) + [len(dates_all) - 1]
+    ax1.set_xticks(tick_idx)
+    ax1.set_xticklabels([dates_all[i][:7] if i < len(dates_all)-1 else "16-Oct-26" for i in tick_idx], fontsize=7.0, rotation=16)
+    ax1.set_ylim(0.5, 5.2)
+    ax1.set_ylabel("Trailing Price-to-Book Multiple (x)", fontsize=8.5, fontweight="bold")
+    ax1.set_title("A. 5-Year Historical P/B Band (Feb 2021 – Oct 2026)", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax1.legend(loc="upper right", fontsize=6.8, ncol=2, frameon=True)
+
+    # Right: Beta Evidence Sensitivity across 4 Specifications
+    bspecs = data["beta_specs"]
+    blbls = ["1. TV 1Y Raw\n(0.64 → 0.76 Blume)\n[Ke=11.23%]",
+             "2. 60M Monthly\n(0.69 → 0.79 Blume)\n[Ke=11.38%]",
+             "3. KSI Broker\n(0.94 → 0.96 Blume)\n[Ke=12.07%]",
+             "4. Manual Unadj.\n(1.00 → 1.00 Blume)\n[Ke=12.25%]"]
+    xb = np.arange(len(bspecs))
+    ax2.bar(xb - 0.18, [b["pt_base"] for b in bspecs], 0.35, color=BSI_TEAL, label="Base 12M Blended TP (IDR)")
+    ax2.bar(xb + 0.18, [b["pt_prob"] for b in bspecs], 0.35, color=BSI_ORANGE, label="Prob-Wtd 12M TP (IDR)")
+    for i, b in enumerate(bspecs):
+        ax2.text(i - 0.18, b["pt_base"] + 25, f"Rp{b['pt_base']:,.0f}", ha="center", fontsize=7.0, fontweight="bold", color=BSI_DARK_TEAL)
+        ax2.text(i + 0.18, b["pt_prob"] + 25, f"Rp{b['pt_prob']:,.0f}\n(+{b['upside_prob']*100:.1f}%)", ha="center", fontsize=6.9, fontweight="bold", color=BSI_ORANGE)
+
+    ax2.axhline(1095.0, color=BSI_RED, ls="--", lw=1.2, label="Current Price: IDR 1,095")
+    ax2.set_xticks(xb)
+    ax2.set_xticklabels(blbls, fontsize=7.1, fontweight="bold")
+    ax2.set_ylim(0, 2350)
+    ax2.set_ylabel("12-Month Target Price (IDR/share)", fontsize=8.5, fontweight="bold")
+    ax2.set_title("B. Beta Specification Audit: BUY Rating Holds Across All 4 Betas", fontsize=9.2, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="lower right", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit17_historical_pb_band_beta.png"))
+    plt.close()
+
+
+def plot_exhibit18_porters_five_forces_radar(data: dict):
+    """Exhibit 18 (Appendix): Porter's Five Forces 5-Level Concentric Circle Radar & Relative Valuation Sensitivity"""
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.2, 4.2), gridspec_kw={"width_ratios": [1.12, 0.98]})
+
+    # Left: 5-Level Concentric Circle Radar Chart (Levels 1 to 5)
+    ring_specs = [
+        (5.0, "#FDEDEC", "#E6B0AA", "5"),
+        (4.0, "#FEF5EC", "#FAD7A0", "4"),
+        (3.0, "#F8F9F9", BSI_SLATE, "3 (Neutral)"),
+        (2.0, "#E6F5F4", "#A3E4D7", "2"),
+        (1.0, "#D1F2EB", "#76D7C4", "1"),
+    ]
+    for r_lvl, fc_col, ec_col, lbl_lvl in ring_specs:
+        is_neut = (r_lvl == 3.0)
+        circ = mpatches.Circle((0, 0), r_lvl, facecolor=fc_col, edgecolor=ec_col,
+                               ls="--" if is_neut else "-", lw=1.4 if is_neut else 0.9, zorder=1)
+        ax1.add_patch(circ)
+        ax1.text(0.12, r_lvl - 0.18, lbl_lvl, fontsize=6.3, fontweight="bold",
+                 color=BSI_NAVY if is_neut else BSI_SLATE, ha="left", va="top", zorder=4)
+
+    # 5 Radial Axes starting from Top (90 deg) clockwise
+    angles_deg = [90, 18, -54, -126, 162]
+    angles_rad = [np.deg2rad(a) for a in angles_deg]
+    forces_meta = [
+        ("Threat of New Entrants", "1.8 / 5.0 (LOW)", "Rp 10tn BUS Cap & DSN-MUI", 1.8, BSI_GREEN, "center", "bottom", (0, 5.35)),
+        ("Power of Depositors", "2.2 / 5.0 (LOW)", "61.6% CASA & 7.69M Hajj", 2.2, BSI_TEAL, "left", "center", (5.35*np.cos(np.deg2rad(18)), 5.35*np.sin(np.deg2rad(18)))),
+        ("Power of Borrowers", "3.1 / 5.0 (MOD)", "Corp Spreads vs Retail Gold", 3.1, BSI_GOLD, "left", "top", (5.35*np.cos(np.deg2rad(-54)), 5.35*np.sin(np.deg2rad(-54)))),
+        ("Intra-Industry Rivalry", "3.2 / 5.0 (MOD)", "BSN & CIMB UUS Spin-Offs", 3.2, BSI_ORANGE, "right", "top", (5.35*np.cos(np.deg2rad(-126)), 5.35*np.sin(np.deg2rad(-126)))),
+        ("Threat of Substitutes", "3.4 / 5.0 (MOD)", "Conv. KBMI-4 & Fintechs", 3.4, BSI_ORANGE, "right", "center", (5.35*np.cos(np.deg2rad(162)), 5.35*np.sin(np.deg2rad(162)))),
+    ]
+
+    # Spokes
+    for theta in angles_rad:
+        ax1.plot([0, 5.0 * np.cos(theta)], [0, 5.0 * np.sin(theta)], color="#BDC3C7", lw=0.9, ls=":", zorder=2)
+
+    # BSI Polygon (scores connected)
+    poly_pts = [(m[3] * np.cos(th), m[3] * np.sin(th)) for m, th in zip(forces_meta, angles_rad)]
+    poly_patch = mpatches.Polygon(poly_pts, closed=True, facecolor=BSI_TEAL, alpha=0.30, edgecolor=BSI_DARK_TEAL, lw=2.3, zorder=3)
+    ax1.add_patch(poly_patch)
+
+    # Vertices & Outer Callout Badges
+    for (title_f, score_str, sub_f, sc_val, v_col, ha_a, va_a, (lx, ly)), th in zip(forces_meta, angles_rad):
+        vx, vy = sc_val * np.cos(th), sc_val * np.sin(th)
+        ax1.scatter(vx, vy, s=75, color=v_col, edgecolors="white", lw=1.5, zorder=5)
+        b_col = v_col if v_col != BSI_GOLD else "#9A7D0A"
+        ax1.text(lx, ly, f"{title_f}: {score_str}\n({sub_f})", ha=ha_a, va=va_a,
+                 fontsize=6.5, fontweight="bold", color=BSI_NAVY,
+                 bbox=dict(boxstyle="round,pad=0.20", fc="white", ec=b_col, lw=0.9, alpha=0.95), zorder=6)
+
+    ax1.text(0, -6.85, "Concentric Circles: 1 = Very Low Threat (Strong Moat)  |  3 = Neutral Benchmark (Dashed)  |  5 = Severe Threat",
+             ha="center", va="center", fontsize=6.6, fontweight="bold", color=BSI_DARK_TEAL,
+             bbox=dict(boxstyle="round,pad=0.20", fc=BSI_MINT, ec=BSI_TEAL, lw=0.7))
+
+    ax1.set_xlim(-10.8, 10.8)
+    ax1.set_ylim(-7.5, 7.5)
+    ax1.set_aspect("equal")
+    ax1.axis("off")
+    ax1.set_title("A. Porter's Five Forces 5-Level Circle Radar (Composite: 2.74 / 5.0 Favorable)",
+                  fontsize=9.1, fontweight="bold", color=BSI_DARK_TEAL, loc="left", pad=6)
+
+    # Right: Relative Valuation Blend Weight Sensitivity (Valuation_Checks R22-R27)
+    w_rel = ["0% Rel\n(100% DDM=RI)", "20% Rel\n(80% DDM=RI)", "25% Rel\n(75% DDM=RI)", "33.3% Rel\n[MODEL BASE]", "40% Rel\n(60% DDM=RI)", "50% Rel\n(50% DDM=RI)"]
+    v_tod = [2019.84, 1844.32, 1800.45, 1727.32, 1668.81, 1581.05]
+    v_12m = [2206.50, 2011.27, 1962.47, 1881.12, 1816.05, 1718.44]
+    xw = np.arange(len(w_rel))
+
+    ax2.bar(xw - 0.17, v_tod, 0.34, color=BSI_DARK_TEAL, label="Blended Value Today (IDR/sh)")
+    ax2.bar(xw + 0.17, v_12m, 0.34, color=BSI_TEAL, label="Blended 12M Target Price (IDR/sh)")
+    for i, (vt, v12) in enumerate(zip(v_tod, v_12m)):
+        ax2.text(i + 0.17, v12 + 30, f"Rp{v12:,.0f}", ha="center", fontsize=7.0, fontweight="bold",
+                 color=BSI_ORANGE if i == 3 else BSI_DARK_TEAL)
+
+    ax2.axhline(1095.0, color=BSI_RED, ls="--", lw=1.2, label="Current Price: IDR 1,095")
+    ax2.set_xticks(xw)
+    ax2.set_xticklabels(w_rel, fontsize=7.1, fontweight="bold")
+    ax2.set_ylim(0, 2550)
+    ax2.set_ylabel("Implied Share Price (IDR)", fontsize=8.2, fontweight="bold")
+    ax2.set_title("B. Target Price Sensitivity to Relative Valuation Weight (0% to 50%)", fontsize=9.1, fontweight="bold", color=BSI_DARK_TEAL, loc="left")
+    ax2.legend(loc="lower right", fontsize=7.0, frameon=True)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(CHARTS_DIR, "exhibit18_porters_five_forces_radar.png"))
+    plt.close()
+
+
+def main():
+    print(f"[Step 1] Parsing Excel Model: {EXCEL_PATH}")
+    data = extract_full_model_data(EXCEL_PATH)
+    print(f"         -> Verified Base 12M TP: IDR {data['valuation']['blended_12m_base']:,.2f} (+{data['valuation']['upside_base']*100:.2f}%)")
+    print(f"         -> Verified Prob-Wtd 12M TP: IDR {data['valuation']['prob_wtd_12m']:,.2f} (+{data['valuation']['upside_prob_wtd']*100:.2f}%)")
+    print(f"         -> Verified Intrinsic DDM=RI 12M TP: IDR {data['valuation']['ddm_12m']:,.2f}")
+
+    print(f"[Step 2] Rendering 18 High-Resolution (300 DPI) Exhibits in: {CHARTS_DIR}")
+    plot_exhibit01_share_price_trajectory(data)
+    plot_exhibit02_business_revenue_financing_mix(data)
+    plot_exhibit03_cost_structure_funding_casa(data)
+    plot_exhibit04_macro_sharia_penetration(data)
+    plot_exhibit05_competitive_positioning_2x2(data)
+    plot_exhibit06_peer_scatter_pb_vs_roe(data)
+    plot_exhibit07_topline_margin_jaws(data)
+    plot_exhibit08_asset_quality_npf_coverage(data)
+    plot_exhibit09_dupont_roe_vs_ke_eva(data)
+    plot_exhibit10_capital_car_dividend_fcfe(data)
+    plot_exhibit11_ddm_ri_bridge_waterfall(data)
+    plot_exhibit12_valuation_football_field(data)
+    plot_exhibit13_sensitivity_2d_heatmap(data)
+    plot_exhibit14_scenario_analysis_matrix(data)
+    plot_exhibit15_risk_matrix_and_tornado(data)
+    plot_exhibit16_esg_scorecard_and_ke_link(data)
+    plot_exhibit17_historical_pb_band_beta(data)
+    plot_exhibit18_porters_five_forces_radar(data)
+    print("         -> All 18 Exhibits generated successfully!")
+
+
+if __name__ == "__main__":
+    main()
